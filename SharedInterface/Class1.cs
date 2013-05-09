@@ -4,6 +4,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml.Serialization;
 
 namespace SharedInterface
 {
@@ -63,6 +64,12 @@ namespace SharedInterface
     {
         public string someText;
         public int[] notas;
+
+        public Valor() {
+            someText = "";
+            this.notas = new int[]{};
+        }
+
         public Valor(string txt, int[] notas)
         {
             this.someText = txt;
@@ -79,6 +86,7 @@ namespace SharedInterface
     public interface IValue
     {
     }
+
     public interface IPublicServer
     {
         void storePair(IKey key, IValue value);

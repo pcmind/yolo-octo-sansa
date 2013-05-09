@@ -18,7 +18,6 @@ using System.Xml.Serialization;
 
 namespace SharedServer
 {
-
     [Serializable]
     public class VersionableValue
     {
@@ -32,13 +31,14 @@ namespace SharedServer
     }
 
     [Serializable]
-    public class UnlaodKeyValue
+    public class UnloadKeyValue
     {
         string key;
         IValue value;
-        public UnlaodKeyValue(){}
-        public UnlaodKeyValue(string key, IValue value) { this.key = key; this.value = value; }
+        public UnloadKeyValue(){}
+        public UnloadKeyValue(string key, IValue value) { this.key = key; this.value = value; }
     }
+
     class ValueHolder
     {
         private volatile VersionableValue _value = null;
@@ -95,6 +95,11 @@ namespace SharedServer
         {
             return Owner == null;
         }
+    }
+    [Serializable]
+    public struct SerKeyValuePair<K, V> {
+        public K Key { get; set; }
+        public V Value { get; set; }
     }
 
     interface IPrivateServer : IPublicServer
@@ -334,10 +339,51 @@ namespace SharedServer
             }
             return list;
         }
+        
+        public void SerializeDB(string filename) {
+            List<SerKeyValuePair<string, object>> ownItems = new List<SerKeyValuePair<string, object>>();
+            Type valueType = null;
+            _lock.AcquireReaderLock(Timeout.Infinite);
+            try {
+                foreach (KeyValuePair<string, ValueHolder> kp in key_value_db) {
+                    if (kp.Value.IsLocal()) {
+                        if (valueType == null) {
+                            valueType = kp.Value.Value.GetType();
+                        }
+                        SerKeyValuePair<string, object> serKP = new SerKeyValuePair<string, object>();
+                        serKP.Key = kp.Key;
+                        serKP.Value = kp.Value.Value;
+                        ownItems.Add(serKP);
+                    }
+                }
+            } finally {
+                _lock.ReleaseReaderLock();
+            }
+            byte[] encodedText = Encoding.Unicode.GetBytes(SerializeObject(ownItems, valueType).ToCharArray());
+            using (FileStream fs = File.Create(filename)) {
+                fs.WriteAsync(encodedText, 0, encodedText.Length);
+            }
+        }
 
-        public static string SerializeObject<T>(T toSerialize)
+        public void DeserializeDB(string filename) {
+            if (!File.Exists(filename)) {
+                return;
+            }
+            using (FileStream fs = File.OpenRead(filename)) {
+                List<SerKeyValuePair<string, object>> ownItems = new List<SerKeyValuePair<string, object>>();
+
+                XmlSerializer xmlSerializer = new XmlSerializer(ownItems.GetType());
+                ownItems = (List<SerKeyValuePair<string, object>>)xmlSerializer.Deserialize(fs);
+                Console.WriteLine(ownItems);
+                foreach (SerKeyValuePair<string, object> serKP in ownItems) {
+                    Console.WriteLine(serKP.Key);
+                }
+            }
+        }
+
+        public static string SerializeObject<mainT>(mainT toSerialize, Type[] valueType)
         {
-            XmlSerializer xmlSerializer = new XmlSerializer(toSerialize.GetType());
+            XmlSerializer xmlSerializer = new XmlSerializer(toSerialize.GetType(), valueType);
             StringWriter textWriter = new StringWriter();
 
             xmlSerializer.Serialize(textWriter, toSerialize);
@@ -346,16 +392,13 @@ namespace SharedServer
 
         public void unloadStore()
         {
-            List<UnlaodKeyValue> l = new List<UnlaodKeyValue>();
+            List<UnloadKeyValue> l = new List<UnloadKeyValue>();
             foreach (KeyValuePair<string, ValueHolder> kp in key_value_db)
             {
-                l.Add(new UnlaodKeyValue(kp.Key, kp.Value.Value));
+                l.Add(new UnloadKeyValue(kp.Key, kp.Value.Value));
             }
-            System.Xml.Serialization.XmlSerializer x = new System.Xml.Serialization.XmlSerializer(typeof(List<UnlaodKeyValue>));
+            System.Xml.Serialization.XmlSerializer x = new System.Xml.Serialization.XmlSerializer(typeof(List<UnloadKeyValue>));
             x.Serialize(Console.Out, l);
         }
     }
-
-
-    
 }

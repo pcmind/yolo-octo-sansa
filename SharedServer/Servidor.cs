@@ -16,10 +16,16 @@ namespace SharedServer {
     public class Servidor : MarshalByRefObject, IPrivateServer {
         private static readonly bool DEBUG = true;
         internal static ServerEndPoint meuendpoint = null;
-        private static readonly ManualResetEvent stop_server = new ManualResetEvent(false);
         private static Dictionary<string, ServerEndPoint> servidores = new Dictionary<string, ServerEndPoint>();
-        private ServerDictionary db = new ServerDictionary();
+        private static ServerDictionary db = new ServerDictionary();
         private static readonly ReaderWriterLock _lock = new ReaderWriterLock();
+
+        public Servidor() {
+            //dados para cada servidor ter algumas chaves dele proprio
+            db.TryAddValue(new MyKey(meuendpoint.Name, 1).HashString, new Valor(meuendpoint.Name, new int[] { 1 }));
+            db.TryAddValue(new MyKey(meuendpoint.Name, 2).HashString, new Valor(meuendpoint.Name, new int[] { 2 }));
+            db.TryAddValue(new MyKey(meuendpoint.Name, 3).HashString, new Valor(meuendpoint.Name, new int[] { 3 }));
+        }
 
         // ========================================================================
         //          SERVIDORES
@@ -35,6 +41,7 @@ namespace SharedServer {
             AsyncCallAndWait(actions);
             return db.TryGetVersionValue(key, out value);
         }
+
         public bool SrvUpdateValue(string key, VersionableValue value) {
             debug("SrvUpdateValue a actualisar chave: " + key);
             ValueHolder v;
@@ -48,11 +55,13 @@ namespace SharedServer {
             }
             return false;
         }
+
         private void DeleteFromRemoteClients(string key) {
             //optimistic, So existe lista de cliente se a cahve for local
             foreach (ServerEndPoint ep in db.TryGetClients(key))
                 AsyncCallNoWait(() => ep.Execute((x) => x.SrvDeleteValue(key)));
         }
+
         public void SrvDeleteValue(string key) {
             debug("SrvDeleteValue: a remover chave: " + key);
             ValueHolder v;
@@ -60,6 +69,7 @@ namespace SharedServer {
                 return;
             DeleteFromRemoteClients(key); //garantido que so apaga se for local
         }
+        
         public bool SrvSetNewOwner(string key, string new_owner) {
             ServerEndPoint serv;
             if (new_owner == meuendpoint.Name) {
@@ -77,6 +87,7 @@ namespace SharedServer {
             debug("SetNewOwner: a alterar para novo dono");
             return true;
         }
+        
         public VersionableValue SrvGetLocalValue(string key, string servername) {
             VersionableValue v;
             ServerEndPoint serv;
@@ -95,6 +106,7 @@ namespace SharedServer {
             return v;
 
         }
+        
         public void SrvAlive(string server_name) {
             debug("SrvAlive: servidor " + server_name + " ligado");
             ServerEndPoint s;
@@ -102,6 +114,7 @@ namespace SharedServer {
                 s.Status = ServerEndPointStatus.ALIVE;
             }
         }
+        
         public void SrvShutdown(string server_name) {
             debug("SrvAlive: servidor " + server_name + " a desligar");
             ServerEndPoint s;
@@ -113,7 +126,6 @@ namespace SharedServer {
         // ========================================================================
         //          CLIENTES
         // ========================================================================
-
         public void storePair(IKey key, IValue value) {
             VersionableValue v;
             if (db.TryGetVersionValue(key, out v) || GetAndCacheFromRemote(key, out v)) {
@@ -140,6 +152,7 @@ namespace SharedServer {
             }
             return null;
         }
+
         public void updatePair(IKey key, IValue newValue) {
             VersionableValue v_v;
             debug("updatePair: A actualizar a chave: " + key.HashString);
@@ -161,6 +174,7 @@ namespace SharedServer {
                 debug("Chave nao encontrada");
             }
         }
+        
         public void deletePair(IKey key) {
             debug("A apagar a chave: " + key.HashString);
             VersionableValue v_v;
@@ -178,8 +192,51 @@ namespace SharedServer {
                 AsyncCallAndWait(actions);
             }
         }
+        
         public void sayHelllo() {
             Console.WriteLine("hello");
+        }
+
+        public static void AsyncCallAndWait(List<Action> actions) {
+            List<IAsyncResult> result = new List<IAsyncResult>();
+            foreach (Action action in actions) {
+                result.Add(action.BeginInvoke(null, null));
+            }
+            for (int i = 0; i < actions.Count; i++)
+                actions.ElementAt(i).EndInvoke(result.ElementAt(i));
+        }
+
+        public static bool AsyncCallAndWait(Action action) {
+            IAsyncResult result = action.BeginInvoke(null, null);
+            try {
+                action.EndInvoke(result);
+            }
+            catch (Exception) {
+                return false;
+            }
+            return true;
+        }
+
+        public static void AsyncCallNoWait(Action action) {
+            action.BeginInvoke(null, null);
+        }
+
+        private static void backupServer(string name) {
+            db.SerializeDB(name + ".xml");
+        }
+
+        private static void restoreServer(string name) {
+            db.DeserializeDB(name + ".xml");
+        }
+
+        public static void debug(Action action) {
+            if (DEBUG)
+                action();
+        }
+
+        public static void debug(string msg) {
+            if (DEBUG)
+                Console.WriteLine(msg);
         }
 
         static void Main(string[] args) {
@@ -261,45 +318,32 @@ namespace SharedServer {
                     });
                 }
 
-                Console.WriteLine("Prima enter para terminar o servidor!");
-                Console.ReadLine();
-            }
-        }
-        public Servidor() {
-            //dados para cada servidor ter algumas chaves dele proprio
-            db.TryAddValue(new MyKey(meuendpoint.Name, 1).HashString, new Valor(meuendpoint.Name, new int[] { 1 }));
-            db.TryAddValue(new MyKey(meuendpoint.Name, 2).HashString, new Valor(meuendpoint.Name, new int[] { 2 }));
-            db.TryAddValue(new MyKey(meuendpoint.Name, 3).HashString, new Valor(meuendpoint.Name, new int[] { 3 }));
-        }
+                do {
+                    Console.Write("Accao pretendida: ");
+                    string cmd = Console.ReadLine();
+                    switch (cmd) {
+                        case "shutdown":
+                            Console.WriteLine("Prima enter para terminar o servidor!");
+                            Console.ReadLine();
+                            return;
 
-        public static void AsyncCallAndWait(List<Action> actions) {
-            List<IAsyncResult> result = new List<IAsyncResult>();
-            foreach (Action action in actions) {
-                result.Add(action.BeginInvoke(null, null));
+                        case "backup":
+                            Console.WriteLine("Saving....");
+                            backupServer(nome_servidor);
+                            break;
+
+                        case "restore":
+                            Console.WriteLine("Loading....");
+                            restoreServer(nome_servidor);
+                            break;
+
+                        default:
+                            Console.WriteLine("Commando invalido");
+                            Console.WriteLine("Commandos possiveis: shutdown, backup, restore");
+                            break;
+                    }
+                } while (true);
             }
-            for (int i = 0; i < actions.Count; i++)
-                actions.ElementAt(i).EndInvoke(result.ElementAt(i));
-        }
-        public static bool AsyncCallAndWait(Action action) {
-            IAsyncResult result = action.BeginInvoke(null, null);
-            try {
-                action.EndInvoke(result);
-            }
-            catch (Exception) {
-                return false;
-            }
-            return true;
-        }
-        public static void AsyncCallNoWait(Action action) {
-            action.BeginInvoke(null, null);
-        }
-        public static void debug(Action action) {
-            if (DEBUG)
-                action();
-        }
-        public static void debug(string msg) {
-            if (DEBUG)
-                Console.WriteLine(msg);
         }
     }
 }
