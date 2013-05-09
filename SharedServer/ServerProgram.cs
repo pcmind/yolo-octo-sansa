@@ -341,14 +341,14 @@ namespace SharedServer
         }
         
         public void SerializeDB(string filename) {
+            List<Type> types = new List<Type>();
             List<SerKeyValuePair<string, object>> ownItems = new List<SerKeyValuePair<string, object>>();
-            Type valueType = null;
             _lock.AcquireReaderLock(Timeout.Infinite);
             try {
                 foreach (KeyValuePair<string, ValueHolder> kp in key_value_db) {
                     if (kp.Value.IsLocal()) {
-                        if (valueType == null) {
-                            valueType = kp.Value.Value.GetType();
+                        if (!types.Exists(item => item.Equals(kp.Value.Value.GetType()))) {
+                            types.Add(kp.Value.Value.GetType());
                         }
                         SerKeyValuePair<string, object> serKP = new SerKeyValuePair<string, object>();
                         serKP.Key = kp.Key;
@@ -359,7 +359,7 @@ namespace SharedServer
             } finally {
                 _lock.ReleaseReaderLock();
             }
-            byte[] encodedText = Encoding.Unicode.GetBytes(SerializeObject(ownItems, valueType).ToCharArray());
+            byte[] encodedText = Encoding.Unicode.GetBytes(SerializeObject(ownItems, types.ToArray<Type>()).ToCharArray());
             using (FileStream fs = File.Create(filename)) {
                 fs.WriteAsync(encodedText, 0, encodedText.Length);
             }
