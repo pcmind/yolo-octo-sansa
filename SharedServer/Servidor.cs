@@ -22,9 +22,9 @@ namespace SharedServer {
 
         public Servidor() {
             //dados para cada servidor ter algumas chaves dele proprio
-            db.TryAddValue(new MyKey(meuendpoint.Name, 1).HashString, new Valor(meuendpoint.Name, new int[] { 1 }));
+            /*db.TryAddValue(new MyKey(meuendpoint.Name, 1).HashString, new Valor(meuendpoint.Name, new int[] { 1 }));
             db.TryAddValue(new MyKey(meuendpoint.Name, 2).HashString, new Valor(meuendpoint.Name, new int[] { 2 }));
-            db.TryAddValue(new MyKey(meuendpoint.Name, 3).HashString, new Valor(meuendpoint.Name, new int[] { 3 }));
+            db.TryAddValue(new MyKey(meuendpoint.Name, 3).HashString, new Valor(meuendpoint.Name, new int[] { 3 }));*/
         }
 
         // ========================================================================
@@ -222,11 +222,11 @@ namespace SharedServer {
         }
 
         private static void backupServer(string name) {
-            db.SerializeDB(name + ".xml");
+            db.SerializeDB(name);
         }
 
         private static void restoreServer(string name) {
-            db.DeserializeDB(name + ".xml");
+            db.DeserializeDB(name);
         }
 
         public static void debug(Action action) {
@@ -265,6 +265,9 @@ namespace SharedServer {
                 Console.Error.WriteLine("Nao foi encontrado configurações validas para o servidor " + nome_servidor);
             }
             else {
+                // Restaurar dados do servidor do ultimo shutdown se existirem
+                restoreServer(nome_servidor);
+
                 IServerChannelSinkProvider serverProv;
                 IClientChannelSinkProvider clientProv;
                 IChannel hch;
@@ -300,7 +303,6 @@ namespace SharedServer {
                     WellKnownObjectMode.Singleton
                     );
 
-
                 Console.WriteLine("+++++++++++++++++++++++++++++++++++++++++++");
                 Console.WriteLine("Servidor: " + meuendpoint.Name);
                 Console.WriteLine("+++++++++++++++++++++++++++++++++++++++++++");
@@ -325,6 +327,7 @@ namespace SharedServer {
                         case "shutdown":
                             Console.WriteLine("Prima enter para terminar o servidor!");
                             Console.ReadLine();
+                            backupServer(nome_servidor);
                             return;
 
                         case "backup":

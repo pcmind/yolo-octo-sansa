@@ -15,6 +15,7 @@ using System.Threading;
 using System.Runtime.Serialization.Formatters;
 using System.Xml.Linq;
 using System.Xml.Serialization;
+using System.Xml;
 
 namespace SharedServer
 {
@@ -342,12 +343,14 @@ namespace SharedServer
         
         public void SerializeDB(string filename) {
             List<Type> types = new List<Type>();
+            List<string> typeNames = new List<string>();
             List<SerKeyValuePair<string, object>> ownItems = new List<SerKeyValuePair<string, object>>();
             _lock.AcquireReaderLock(Timeout.Infinite);
             try {
                 foreach (KeyValuePair<string, ValueHolder> kp in key_value_db) {
                     if (kp.Value.IsLocal()) {
                         if (!types.Exists(item => item.Equals(kp.Value.Value.GetType()))) {
+                            typeNames.Add(kp.Value.Value.GetType().AssemblyQualifiedName);
                             types.Add(kp.Value.Value.GetType());
                         }
                         SerKeyValuePair<string, object> serKP = new SerKeyValuePair<string, object>();
@@ -359,35 +362,49 @@ namespace SharedServer
             } finally {
                 _lock.ReleaseReaderLock();
             }
-            byte[] encodedText = Encoding.Unicode.GetBytes(SerializeObject(ownItems, types.ToArray<Type>()).ToCharArray());
-            using (FileStream fs = File.Create(filename)) {
-                fs.WriteAsync(encodedText, 0, encodedText.Length);
+            
+            XmlSerializer xmlSerializer = new XmlSerializer(typeNames.GetType());
+            using (FileStream fs = File.Create(filename + "_extraTypes.xml")) {
+                xmlSerializer.Serialize(fs, typeNames);
+            }
+
+            Type[] typesArr = types.ToArray<Type>();
+            xmlSerializer = new XmlSerializer(ownItems.GetType(), typesArr);
+            using (FileStream fs = File.Create(filename + ".xml")) {
+                xmlSerializer.Serialize(fs, ownItems);
             }
         }
 
         public void DeserializeDB(string filename) {
-            if (!File.Exists(filename)) {
+            Type[] typesArr; 
+            if (!File.Exists(filename + ".xml") || !File.Exists(filename + "_extraTypes.xml")) {
                 return;
             }
-            using (FileStream fs = File.OpenRead(filename)) {
-                List<SerKeyValuePair<string, object>> ownItems = new List<SerKeyValuePair<string, object>>();
+            using (FileStream fs = File.OpenRead(filename + "_extraTypes.xml")) {
+                List<string> typeNames = new List<string>();
 
-                XmlSerializer xmlSerializer = new XmlSerializer(ownItems.GetType());
-                ownItems = (List<SerKeyValuePair<string, object>>)xmlSerializer.Deserialize(fs);
-                Console.WriteLine(ownItems);
-                foreach (SerKeyValuePair<string, object> serKP in ownItems) {
-                    Console.WriteLine(serKP.Key);
+                XmlSerializer xmlSerializer = new XmlSerializer(typeNames.GetType());
+                typeNames = (List<string>)xmlSerializer.Deserialize(fs);
+                typesArr = new Type[typeNames.Count];
+                int i = 0;
+                foreach (string typeName in typeNames) {
+                    typesArr[i++] = Type.GetType(typeName);
                 }
             }
-        }
+            using (FileStream fs = File.OpenRead(filename + ".xml")) {
+                List<SerKeyValuePair<string, object>> ownItems = new List<SerKeyValuePair<string, object>>();
 
-        public static string SerializeObject<mainT>(mainT toSerialize, Type[] valueType)
-        {
-            XmlSerializer xmlSerializer = new XmlSerializer(toSerialize.GetType(), valueType);
-            StringWriter textWriter = new StringWriter();
+                var xmlReaderSettings = new XmlReaderSettings();
+                xmlReaderSettings.CheckCharacters = false;
+                XmlReader xmlReader = XmlTextReader.Create(fs, xmlReaderSettings);
 
-            xmlSerializer.Serialize(textWriter, toSerialize);
-            return textWriter.ToString();
+                XmlSerializer xmlSerializer = new XmlSerializer(ownItems.GetType(), typesArr);
+                ownItems = (List<SerKeyValuePair<string, object>>)xmlSerializer.Deserialize(xmlReader);
+                _lock.AcquireWriterLock(Timeout.Infinite);
+                foreach (SerKeyValuePair<string, object> serKP in ownItems) {
+                    TryAddValue(serKP.Key, (IValue)serKP.Value);
+                }
+            }
         }
 
         public void unloadStore()
